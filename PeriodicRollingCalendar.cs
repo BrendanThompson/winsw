@@ -7,8 +7,25 @@ namespace winsw
     /**
      *  This is largely borrowed from the logback Rolling Calendar.
      **/
+
     public class PeriodicRollingCalendar
     {
+        public enum PeriodicityType
+        {
+            ERRONEOUS,
+            TOP_OF_MILLISECOND,
+            TOP_OF_SECOND,
+            TOP_OF_MINUTE,
+            TOP_OF_HOUR,
+            TOP_OF_DAY
+        }
+
+        private static readonly PeriodicityType[] VALID_ORDERED_LIST =
+        {
+            PeriodicityType.TOP_OF_MILLISECOND, PeriodicityType.TOP_OF_SECOND, PeriodicityType.TOP_OF_MINUTE,
+            PeriodicityType.TOP_OF_HOUR, PeriodicityType.TOP_OF_DAY
+        };
+
         private readonly string _format;
         private readonly long _period;
         private DateTime _currentRoll;
@@ -21,33 +38,46 @@ namespace winsw
             _currentRoll = DateTime.Now;
         }
 
+        public PeriodicityType periodicityType { get; set; }
+
+        public bool shouldRoll
+        {
+            get
+            {
+                var now = DateTime.Now;
+                if (now > _nextRoll)
+                {
+                    _currentRoll = now;
+                    _nextRoll = nextTriggeringTime(now, _period);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        public string format
+        {
+            get { return _currentRoll.ToString(_format); }
+        }
+
         public void init()
         {
             periodicityType = determinePeriodicityType();
             _nextRoll = nextTriggeringTime(_currentRoll, _period);
         }
 
-        public enum PeriodicityType
-        {
-            ERRONEOUS, TOP_OF_MILLISECOND, TOP_OF_SECOND, TOP_OF_MINUTE, TOP_OF_HOUR, TOP_OF_DAY
-        }
-
-        private static readonly PeriodicityType[] VALID_ORDERED_LIST = {
-            PeriodicityType.TOP_OF_MILLISECOND, PeriodicityType.TOP_OF_SECOND, PeriodicityType.TOP_OF_MINUTE, PeriodicityType.TOP_OF_HOUR, PeriodicityType.TOP_OF_DAY
-        };
-
         private PeriodicityType determinePeriodicityType()
         {
-            PeriodicRollingCalendar periodicRollingCalendar = new PeriodicRollingCalendar(_format, _period);
-            DateTime epoch = new DateTime(1970, 1, 1);
+            var periodicRollingCalendar = new PeriodicRollingCalendar(_format, _period);
+            var epoch = new DateTime(1970, 1, 1);
 
-            foreach (PeriodicityType i in VALID_ORDERED_LIST)
+            foreach (var i in VALID_ORDERED_LIST)
             {
-                string r0 = epoch.ToString(_format);
+                var r0 = epoch.ToString(_format);
                 periodicRollingCalendar.periodicityType = i;
 
-                DateTime next = periodicRollingCalendar.nextTriggeringTime(epoch, 1);
-                string r1 = next.ToString(_format);
+                var next = periodicRollingCalendar.nextTriggeringTime(epoch, 1);
+                var r1 = next.ToString(_format);
 
                 if (r0 != null && r1 != null && !r0.Equals(r1))
                 {
@@ -63,7 +93,8 @@ namespace winsw
             switch (periodicityType)
             {
                 case PeriodicityType.TOP_OF_MILLISECOND:
-                    output = new DateTime(input.Year, input.Month, input.Day, input.Hour, input.Minute, input.Second, input.Millisecond);
+                    output = new DateTime(input.Year, input.Month, input.Day, input.Hour, input.Minute, input.Second,
+                        input.Millisecond);
                     output = output.AddMilliseconds(increment);
                     return output;
                 case PeriodicityType.TOP_OF_SECOND:
@@ -86,31 +117,5 @@ namespace winsw
                     throw new Exception("invalid periodicity type: " + periodicityType);
             }
         }
-
-        public PeriodicityType periodicityType { get; set; }
-
-        public Boolean shouldRoll
-        {
-            get
-            {
-                DateTime now = DateTime.Now;
-                if (now > _nextRoll)
-                {
-                    _currentRoll = now;
-                    _nextRoll = nextTriggeringTime(now, _period);
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        public string format
-        {
-            get
-            {
-                return _currentRoll.ToString(_format);
-            }
-        }
-
     }
 }

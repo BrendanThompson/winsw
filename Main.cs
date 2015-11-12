@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Text;
@@ -10,35 +11,23 @@ using System.Threading;
 using Microsoft.Win32;
 using WMI;
 using ServiceType = WMI.ServiceType;
-using System.Reflection;
 
 namespace winsw
 {
     public class WrapperService : ServiceBase, EventLogger
     {
-        private SERVICE_STATUS _wrapperServiceStatus;
-
-        private readonly Process _process = new Process();
         private readonly ServiceDescriptor _descriptor;
+        private readonly Process _process = new Process();
         private Dictionary<string, string> _envs;
 
         /// <summary>
-        /// Indicates to the watch dog thread that we are going to terminate the process,
-        /// so don't try to kill us when the child exits.
+        ///     Indicates to the watch dog thread that we are going to terminate the process,
+        ///     so don't try to kill us when the child exits.
         /// </summary>
         private bool _orderlyShutdown;
-        private bool _systemShuttingdown;
 
-        /// <summary>
-        /// Version of Windows service wrapper
-        /// </summary>
-        /// <remarks>
-        /// The version will be taken from <see cref="AssemblyInfo"/>
-        /// </remarks>
-        public static Version Version
-        {
-            get { return Assembly.GetExecutingAssembly().GetName().Version; }
-        }
+        private bool _systemShuttingdown;
+        private SERVICE_STATUS _wrapperServiceStatus;
 
         public WrapperService(ServiceDescriptor descriptor)
         {
@@ -51,99 +40,22 @@ namespace winsw
             _systemShuttingdown = false;
         }
 
-        public WrapperService() : this (new ServiceDescriptor())
-        {          
+        public WrapperService() : this(new ServiceDescriptor())
+        {
         }
 
         /// <summary>
-        /// Process the file copy instructions, so that we can replace files that are always in use while
-        /// the service runs.
+        ///     Version of Windows service wrapper
         /// </summary>
-        private void HandleFileCopies()
+        /// <remarks>
+        ///     The version will be taken from <see cref="AssemblyInfo" />
+        /// </remarks>
+        public static Version Version
         {
-            var file = _descriptor.BasePath + ".copies";
-            if (!File.Exists(file))
-                return; // nothing to handle
-
-            try
-            {
-                using (var tr = new StreamReader(file,Encoding.UTF8))
-                {
-                    string line;
-                    while ((line = tr.ReadLine()) != null)
-                    {
-                        LogEvent("Handling copy: " + line);
-                        string[] tokens = line.Split('>');
-                        if (tokens.Length > 2)
-                        {
-                            LogEvent("Too many delimiters in " + line);
-                            continue;
-                        }
-
-                        CopyFile(tokens[0], tokens[1]);
-                    }
-                }
-            }
-            finally
-            {
-                File.Delete(file);
-            }
-
+            get { return Assembly.GetExecutingAssembly().GetName().Version; }
         }
 
-        /// <summary>
-        /// File replacement.
-        /// </summary>
-        private void CopyFile(string sourceFileName, string destFileName)
-        {
-            try
-            {
-                File.Delete(destFileName);
-                File.Move(sourceFileName, destFileName);
-            }
-            catch (IOException e)
-            {
-                LogEvent("Failed to copy :" + sourceFileName + " to " + destFileName + " because " + e.Message);
-            }
-        }
-
-        /// <summary>
-        /// Starts a thread that protects the execution with a try/catch block.
-        /// It appears that in .NET, unhandled exception in any thread causes the app to terminate
-        /// http://msdn.microsoft.com/en-us/library/ms228965.aspx
-        /// </summary>
-        private void StartThread(ThreadStart main)
-        {
-            new Thread(delegate() {
-                try
-                {
-                    main();
-                }
-                catch (Exception e)
-                {
-                    WriteEvent("Thread failed unexpectedly",e);
-                }
-            }).Start();
-        }
-
-        /// <summary>
-        /// Handle the creation of the logfiles based on the optional logmode setting.
-        /// </summary>
-        private void HandleLogfiles()
-        {
-            string logDirectory = _descriptor.LogDirectory;
-
-            if (!Directory.Exists(logDirectory))
-            {
-                Directory.CreateDirectory(logDirectory);
-            }
-
-            LogHandler logAppender = _descriptor.LogHandler;
-            logAppender.EventLogger = this;
-            logAppender.log(_process.StandardOutput.BaseStream, _process.StandardError.BaseStream);
-        }
-
-        public void LogEvent(String message)
+        public void LogEvent(string message)
         {
             if (_systemShuttingdown)
             {
@@ -162,7 +74,7 @@ namespace winsw
             }
         }
 
-        public void LogEvent(String message, EventLogEntryType type)
+        public void LogEvent(string message, EventLogEntryType type)
         {
             if (_systemShuttingdown)
             {
@@ -181,20 +93,108 @@ namespace winsw
             }
         }
 
+        /// <summary>
+        ///     Process the file copy instructions, so that we can replace files that are always in use while
+        ///     the service runs.
+        /// </summary>
+        private void HandleFileCopies()
+        {
+            var file = _descriptor.BasePath + ".copies";
+            if (!File.Exists(file))
+                return; // nothing to handle
+
+            try
+            {
+                using (var tr = new StreamReader(file, Encoding.UTF8))
+                {
+                    string line;
+                    while ((line = tr.ReadLine()) != null)
+                    {
+                        LogEvent("Handling copy: " + line);
+                        var tokens = line.Split('>');
+                        if (tokens.Length > 2)
+                        {
+                            LogEvent("Too many delimiters in " + line);
+                            continue;
+                        }
+
+                        CopyFile(tokens[0], tokens[1]);
+                    }
+                }
+            }
+            finally
+            {
+                File.Delete(file);
+            }
+        }
+
+        /// <summary>
+        ///     File replacement.
+        /// </summary>
+        private void CopyFile(string sourceFileName, string destFileName)
+        {
+            try
+            {
+                File.Delete(destFileName);
+                File.Move(sourceFileName, destFileName);
+            }
+            catch (IOException e)
+            {
+                LogEvent("Failed to copy :" + sourceFileName + " to " + destFileName + " because " + e.Message);
+            }
+        }
+
+        /// <summary>
+        ///     Starts a thread that protects the execution with a try/catch block.
+        ///     It appears that in .NET, unhandled exception in any thread causes the app to terminate
+        ///     http://msdn.microsoft.com/en-us/library/ms228965.aspx
+        /// </summary>
+        private void StartThread(ThreadStart main)
+        {
+            new Thread(delegate()
+            {
+                try
+                {
+                    main();
+                }
+                catch (Exception e)
+                {
+                    WriteEvent("Thread failed unexpectedly", e);
+                }
+            }).Start();
+        }
+
+        /// <summary>
+        ///     Handle the creation of the logfiles based on the optional logmode setting.
+        /// </summary>
+        private void HandleLogfiles()
+        {
+            var logDirectory = _descriptor.LogDirectory;
+
+            if (!Directory.Exists(logDirectory))
+            {
+                Directory.CreateDirectory(logDirectory);
+            }
+
+            var logAppender = _descriptor.LogHandler;
+            logAppender.EventLogger = this;
+            logAppender.log(_process.StandardOutput.BaseStream, _process.StandardError.BaseStream);
+        }
+
         private void WriteEvent(Exception exception)
         {
             WriteEvent(exception.Message + "\nStacktrace:" + exception.StackTrace);
         }
 
-        private void WriteEvent(String message, Exception exception)
+        private void WriteEvent(string message, Exception exception)
         {
             WriteEvent(message + "\nMessage:" + exception.Message + "\nStacktrace:" + exception.StackTrace);
         }
 
-        private void WriteEvent(String message)
+        private void WriteEvent(string message)
         {
-            string logfilename = Path.Combine(_descriptor.LogDirectory, _descriptor.BaseName + ".wrapper.log");
-            StreamWriter log = new StreamWriter(logfilename, true);
+            var logfilename = Path.Combine(_descriptor.LogDirectory, _descriptor.BaseName + ".wrapper.log");
+            var log = new StreamWriter(logfilename, true);
 
             log.WriteLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " - " + message);
             log.Flush();
@@ -204,7 +204,7 @@ namespace winsw
         protected override void OnStart(string[] _)
         {
             _envs = _descriptor.EnvironmentVariables;
-            foreach (string key in _envs.Keys)
+            foreach (var key in _envs.Keys)
             {
                 LogEvent("envar " + key + '=' + _envs[key]);
             }
@@ -212,9 +212,9 @@ namespace winsw
             HandleFileCopies();
 
             // handle downloads
-            foreach (Download d in _descriptor.Downloads)
+            foreach (var d in _descriptor.Downloads)
             {
-                LogEvent("Downloading: " + d.From+ " to "+d.To);
+                LogEvent("Downloading: " + d.From + " to " + d.To);
                 try
                 {
                     d.Perform();
@@ -222,12 +222,12 @@ namespace winsw
                 catch (Exception e)
                 {
                     LogEvent("Failed to download " + d.From + " to " + d.To + "\n" + e.Message);
-                    WriteEvent("Failed to download " + d.From +" to "+d.To, e);
+                    WriteEvent("Failed to download " + d.From + " to " + d.To, e);
                     // but just keep going
                 }
             }
 
-            string startarguments = _descriptor.Startarguments;
+            var startarguments = _descriptor.Startarguments;
 
             if (startarguments == null)
             {
@@ -279,11 +279,11 @@ namespace winsw
         }
 
         /// <summary>
-        /// Called when we are told by Windows SCM to exit.
+        ///     Called when we are told by Windows SCM to exit.
         /// </summary>
         private void StopIt()
         {
-            string stoparguments = _descriptor.Stoparguments;
+            var stoparguments = _descriptor.Stoparguments;
             LogEvent("Stopping " + _descriptor.Id);
             WriteEvent("Stopping " + _descriptor.Id);
             _orderlyShutdown = true;
@@ -306,8 +306,8 @@ namespace winsw
 
                 stoparguments += " " + _descriptor.Arguments;
 
-                Process stopProcess = new Process();
-                String executable = _descriptor.StopExecutable;
+                var stopProcess = new Process();
+                var executable = _descriptor.StopExecutable;
 
                 if (executable == null)
                 {
@@ -316,13 +316,13 @@ namespace winsw
 
                 StartProcess(stopProcess, stoparguments, executable);
 
-                WriteEvent("WaitForProcessToExit "+_process.Id+"+"+stopProcess.Id);
+                WriteEvent("WaitForProcessToExit " + _process.Id + "+" + stopProcess.Id);
                 WaitForProcessToExit(_process);
                 WaitForProcessToExit(stopProcess);
                 SignalShutdownComplete();
             }
 
-            if (_systemShuttingdown && _descriptor.BeepOnShutdown) 
+            if (_systemShuttingdown && _descriptor.BeepOnShutdown)
             {
                 Console.Beep();
             }
@@ -378,9 +378,9 @@ namespace winsw
                 WriteEvent("Process " + pid + " is already stopped");
                 return;
             }
-            
+
             WriteEvent("Send SIGINT " + pid);
-            bool successful = SigIntHelper.SendSIGINTToProcess(proc, _descriptor.StopTimeout);
+            var successful = SigIntHelper.SendSIGINTToProcess(proc, _descriptor.StopTimeout);
             if (successful)
             {
                 WriteEvent("SIGINT to" + pid + " successful");
@@ -423,24 +423,24 @@ namespace winsw
 
         private void SignalShutdownPending()
         {
-            IntPtr handle = ServiceHandle;
+            var handle = ServiceHandle;
             _wrapperServiceStatus.checkPoint++;
             _wrapperServiceStatus.waitHint = _descriptor.WaitHint.Milliseconds;
 //            WriteEvent("SignalShutdownPending " + wrapperServiceStatus.checkPoint + ":" + wrapperServiceStatus.waitHint);
-            _wrapperServiceStatus.currentState = (int)State.SERVICE_STOP_PENDING;
+            _wrapperServiceStatus.currentState = (int) State.SERVICE_STOP_PENDING;
             Advapi32.SetServiceStatus(handle, ref _wrapperServiceStatus);
         }
 
         private void SignalShutdownComplete()
         {
-            IntPtr handle = ServiceHandle;
+            var handle = ServiceHandle;
             _wrapperServiceStatus.checkPoint++;
 //            WriteEvent("SignalShutdownComplete " + wrapperServiceStatus.checkPoint + ":" + wrapperServiceStatus.waitHint);
-            _wrapperServiceStatus.currentState = (int)State.SERVICE_STOPPED;
+            _wrapperServiceStatus.currentState = (int) State.SERVICE_STOPPED;
             Advapi32.SetServiceStatus(handle, ref _wrapperServiceStatus);
         }
 
-        private void StartProcess(Process processToStart, string arguments, String executable)
+        private void StartProcess(Process processToStart, string arguments, string executable)
         {
             var ps = processToStart.StartInfo;
             ps.FileName = executable;
@@ -448,13 +448,14 @@ namespace winsw
             ps.WorkingDirectory = _descriptor.WorkingDirectory;
             ps.CreateNoWindow = false;
             ps.UseShellExecute = false;
-            ps.RedirectStandardInput = true; // this creates a pipe for stdin to the new process, instead of having it inherit our stdin.
+            ps.RedirectStandardInput = true;
+                // this creates a pipe for stdin to the new process, instead of having it inherit our stdin.
             ps.RedirectStandardOutput = true;
             ps.RedirectStandardError = true;
 
-            foreach (string key in _envs.Keys)
+            foreach (var key in _envs.Keys)
                 Environment.SetEnvironmentVariable(key, _envs[key]);
-                // ps.EnvironmentVariables[key] = envs[key]; // bugged (lower cases all variable names due to StringDictionary being used, see http://connect.microsoft.com/VisualStudio/feedback/ViewFeedback.aspx?FeedbackID=326163)
+            // ps.EnvironmentVariables[key] = envs[key]; // bugged (lower cases all variable names due to StringDictionary being used, see http://connect.microsoft.com/VisualStudio/feedback/ViewFeedback.aspx?FeedbackID=326163)
 
             processToStart.Start();
             WriteEvent("Started " + processToStart.Id);
@@ -466,18 +467,21 @@ namespace winsw
             // monitor the completion of the process
             StartThread(delegate
             {
-                string msg = processToStart.Id + " - " + processToStart.StartInfo.FileName + " " + processToStart.StartInfo.Arguments;
+                var msg = processToStart.Id + " - " + processToStart.StartInfo.FileName + " " +
+                          processToStart.StartInfo.Arguments;
                 processToStart.WaitForExit();
 
                 try
                 {
                     if (_orderlyShutdown)
                     {
-                        LogEvent("Child process [" + msg + "] terminated with " + processToStart.ExitCode, EventLogEntryType.Information);
+                        LogEvent("Child process [" + msg + "] terminated with " + processToStart.ExitCode,
+                            EventLogEntryType.Information);
                     }
                     else
                     {
-                        LogEvent("Child process [" + msg + "] finished with " + processToStart.ExitCode, EventLogEntryType.Warning);
+                        LogEvent("Child process [" + msg + "] finished with " + processToStart.ExitCode,
+                            EventLogEntryType.Warning);
                         // if we finished orderly, report that to SCM.
                         // by not reporting unclean shutdown, we let Windows SCM to decide if it wants to
                         // restart the service automatically
@@ -512,7 +516,7 @@ namespace winsw
             catch (WmiException e)
             {
                 Console.Error.WriteLine(e);
-                return (int)e.ErrorCode;
+                return (int) e.ErrorCode;
             }
             catch (Exception e)
             {
@@ -532,8 +536,8 @@ namespace winsw
             if (_args.Length > 0)
             {
                 var d = descriptor ?? new ServiceDescriptor();
-                Win32Services svc = new WmiRoot().GetCollection<Win32Services>();
-                Win32Service s = svc.Select(d.Id);
+                var svc = new WmiRoot().GetCollection<Win32Services>();
+                var s = svc.Select(d.Id);
 
                 var args = new List<string>(Array.AsReadOnly(_args));
                 if (args[0] == "/redirect")
@@ -565,12 +569,13 @@ namespace winsw
                     if (s != null)
                     {
                         Console.WriteLine("Service with id '" + d.Id + "' already exists");
-                        Console.WriteLine("To install the service, delete the existing one or change service Id in the configuration file");
+                        Console.WriteLine(
+                            "To install the service, delete the existing one or change service Id in the configuration file");
                         throw new Exception("Installation failure: Service with id '" + d.Id + "' already exists");
                     }
 
-                    string username=null, password=null;
-                    bool setallowlogonasaserviceright = false;
+                    string username = null, password = null;
+                    var setallowlogonasaserviceright = false;
                     if (args.Count > 1 && args[1] == "/p")
                     {
                         // we expected username/password on stdin
@@ -596,13 +601,13 @@ namespace winsw
                             setallowlogonasaserviceright = d.AllowServiceAcountLogonRight;
                         }
                     }
-                    
+
                     if (setallowlogonasaserviceright)
                     {
                         LogonAsAService.AddLogonAsAServiceRight(username);
                     }
 
-                    svc.Create (
+                    svc.Create(
                         d.Id,
                         d.Caption,
                         "\"" + d.ExecutablePath + "\"",
@@ -627,10 +632,11 @@ namespace winsw
 
                     var actions = d.FailureActions;
                     if (actions.Count > 0)
-                    {// set the failure actions
-                        using (ServiceManager scm = new ServiceManager())
+                    {
+// set the failure actions
+                        using (var scm = new ServiceManager())
                         {
-                            using (Service sc = scm.Open(d.Id))
+                            using (var sc = scm.Open(d.Id))
                             {
                                 sc.ChangeConfig(d.ResetFailureAfter, actions);
                             }
@@ -642,7 +648,8 @@ namespace winsw
                 {
                     if (s == null)
                     {
-                        Console.WriteLine("Warning! The service with id '" + d.Id + "' does not exist. Nothing to uninstall");
+                        Console.WriteLine("Warning! The service with id '" + d.Id +
+                                          "' does not exist. Nothing to uninstall");
                         return; // there's no such service, so consider it already uninstalled
                     }
                     try
@@ -671,10 +678,10 @@ namespace winsw
                 }
                 if (args[0] == "restart")
                 {
-                    if (s == null) 
+                    if (s == null)
                         ThrowNoSuchService();
 
-                    if(s.Started)
+                    if (s.Started)
                         s.StopService();
 
                     while (s.Started)
@@ -690,13 +697,14 @@ namespace winsw
                 {
                     // run restart from another process group. see README.md for why this is useful.
 
-                    STARTUPINFO si = new STARTUPINFO();
-                    PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
+                    var si = new STARTUPINFO();
+                    var pi = new PROCESS_INFORMATION();
 
-                    bool result = Kernel32.CreateProcess(null, d.ExecutablePath+" restart", IntPtr.Zero, IntPtr.Zero, false, 0x200/*CREATE_NEW_PROCESS_GROUP*/, IntPtr.Zero, null, ref si, out pi);
+                    var result = Kernel32.CreateProcess(null, d.ExecutablePath + " restart", IntPtr.Zero, IntPtr.Zero,
+                        false, 0x200 /*CREATE_NEW_PROCESS_GROUP*/, IntPtr.Zero, null, ref si, out pi);
                     if (!result)
                     {
-                        throw new Exception("Failed to invoke restart: "+Marshal.GetLastWin32Error());
+                        throw new Exception("Failed to invoke restart: " + Marshal.GetLastWin32Error());
                     }
                     return;
                 }
@@ -712,13 +720,13 @@ namespace winsw
                 }
                 if (args[0] == "test")
                 {
-                    WrapperService wsvc = new WrapperService();
+                    var wsvc = new WrapperService();
                     wsvc.OnStart(args.ToArray());
                     Thread.Sleep(1000);
                     wsvc.OnStop();
                     return;
                 }
-                if (args[0] == "help" || args[0] == "--help" || args[0] == "-h" 
+                if (args[0] == "help" || args[0] == "--help" || args[0] == "-h"
                     || args[0] == "-?" || args[0] == "/?")
                 {
                     printHelp();
@@ -729,18 +737,17 @@ namespace winsw
                     printVersion();
                     return;
                 }
-                
+
                 Console.WriteLine("Unknown command: " + args[0]);
                 printAvailableCommandsInfo();
                 throw new Exception("Unknown command: " + args[0]);
-
             }
             Run(new WrapperService());
         }
 
         private static string ReadPassword()
         {
-            StringBuilder buf = new StringBuilder();
+            var buf = new StringBuilder();
             ConsoleKeyInfo key;
             while (true)
             {
@@ -749,7 +756,7 @@ namespace winsw
                 {
                     return buf.ToString();
                 }
-                else if (key.Key == ConsoleKey.Backspace)
+                if (key.Key == ConsoleKey.Backspace)
                 {
                     buf.Remove(buf.Length - 1, 1);
                     Console.Write("\b \b");
@@ -790,7 +797,7 @@ namespace winsw
             Console.WriteLine("- 'restart'   - restart the service");
             Console.WriteLine("- 'restart!'  - self-restart (can be called from child processes)");
             Console.WriteLine("- 'status'    - check the current status of the service");
-            Console.WriteLine("- 'test'      - check if the service can be started and then stopped");  
+            Console.WriteLine("- 'test'      - check if the service can be started and then stopped");
             Console.WriteLine("- 'version'   - print the version info");
             Console.WriteLine("- 'help'      - print the help info (aliases: -h,--help,-?,/?)");
         }

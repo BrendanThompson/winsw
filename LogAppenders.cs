@@ -12,27 +12,27 @@ namespace winsw
     }
 
     /// <summary>
-    /// Abstraction for handling log.
+    ///     Abstraction for handling log.
     /// </summary>
     public abstract class LogHandler
     {
+        /// <summary>
+        ///     Error and information about logging should be reported here.
+        /// </summary>
+        public EventLogger EventLogger { set; get; }
+
         // ReSharper disable once InconsistentNaming
         public abstract void log(Stream outputStream, Stream errorStream);
 
         /// <summary>
-        /// Error and information about logging should be reported here.
-        /// </summary>
-        public EventLogger EventLogger { set; get; }
-
-        /// <summary>
-        /// Convenience method to copy stuff from StreamReader to StreamWriter
+        ///     Convenience method to copy stuff from StreamReader to StreamWriter
         /// </summary>
         protected void CopyStream(Stream i, Stream o)
         {
-            byte[] buf = new byte[1024];
+            var buf = new byte[1024];
             while (true)
             {
-                int sz = i.Read(buf, 0, buf.Length);
+                var sz = i.Read(buf, 0, buf.Length);
                 if (sz == 0) break;
                 o.Write(buf, 0, sz);
                 o.Flush();
@@ -42,7 +42,7 @@ namespace winsw
         }
 
         /// <summary>
-        /// File replacement.
+        ///     File replacement.
         /// </summary>
         protected void CopyFile(string sourceFileName, string destFileName)
         {
@@ -53,30 +53,27 @@ namespace winsw
             }
             catch (IOException e)
             {
-                EventLogger.LogEvent("Failed to copy :" + sourceFileName + " to " + destFileName + " because " + e.Message);
+                EventLogger.LogEvent("Failed to copy :" + sourceFileName + " to " + destFileName + " because " +
+                                     e.Message);
             }
         }
     }
 
     /// <summary>
-    /// Base class for file-based loggers
+    ///     Base class for file-based loggers
     /// </summary>
     public abstract class AbstractFileLogAppender : LogHandler
     {
-        protected string BaseLogFileName { private set; get; }
-
         public AbstractFileLogAppender(string logDirectory, string baseName)
         {
             BaseLogFileName = Path.Combine(logDirectory, baseName);
         }
+
+        protected string BaseLogFileName { private set; get; }
     }
 
     public abstract class SimpleLogAppender : AbstractFileLogAppender
     {
-        public FileMode FileMode { private set; get; }
-        public string OutputLogFileName { private set; get; }
-        public string ErrorLogFileName { private set; get; }
-
         public SimpleLogAppender(string logDirectory, string baseName, FileMode fileMode)
             : base(logDirectory, baseName)
         {
@@ -84,6 +81,10 @@ namespace winsw
             OutputLogFileName = BaseLogFileName + ".out.log";
             ErrorLogFileName = BaseLogFileName + ".err.log";
         }
+
+        public FileMode FileMode { private set; get; }
+        public string OutputLogFileName { private set; get; }
+        public string ErrorLogFileName { private set; get; }
 
         public override void log(Stream outputStream, Stream errorStream)
         {
@@ -107,9 +108,9 @@ namespace winsw
         {
         }
     }
-    
+
     /// <summary>
-    /// LogHandler that throws away output
+    ///     LogHandler that throws away output
     /// </summary>
     public class IgnoreLogAppender : LogHandler
     {
@@ -122,15 +123,15 @@ namespace winsw
 
     public class TimeBasedRollingLogAppender : AbstractFileLogAppender
     {
-        public string Pattern { get; private set; }
-        public int Period { get; private set; }
-
         public TimeBasedRollingLogAppender(string logDirectory, string baseName, string pattern, int period)
             : base(logDirectory, baseName)
         {
             Pattern = pattern;
             Period = period;
         }
+
+        public string Pattern { get; private set; }
+        public int Period { get; private set; }
 
         public override void log(Stream outputStream, Stream errorStream)
         {
@@ -139,35 +140,38 @@ namespace winsw
         }
 
         /// <summary>
-        /// Works like the CopyStream method but does a log rotation based on time.
+        ///     Works like the CopyStream method but does a log rotation based on time.
         /// </summary>
         private void CopyStreamWithDateRotation(Stream data, string ext)
         {
-            PeriodicRollingCalendar periodicRollingCalendar = new PeriodicRollingCalendar(Pattern, Period);
+            var periodicRollingCalendar = new PeriodicRollingCalendar(Pattern, Period);
             periodicRollingCalendar.init();
 
-            byte[] buf = new byte[1024];
-            FileStream w = new FileStream(BaseLogFileName + "_" + periodicRollingCalendar.format + ext, FileMode.Append);
+            var buf = new byte[1024];
+            var w = new FileStream(BaseLogFileName + "_" + periodicRollingCalendar.format + ext, FileMode.Append);
             while (true)
             {
-                int len = data.Read(buf, 0, buf.Length);
-                if (len == 0) break;    // EOF
+                var len = data.Read(buf, 0, buf.Length);
+                if (len == 0) break; // EOF
 
                 if (periodicRollingCalendar.shouldRoll)
-                {// rotate at the line boundary
-                    int offset = 0;
-                    bool rolled = false;
-                    for (int i = 0; i < len; i++)
+                {
+// rotate at the line boundary
+                    var offset = 0;
+                    var rolled = false;
+                    for (var i = 0; i < len; i++)
                     {
                         if (buf[i] == 0x0A)
-                        {// at the line boundary.
+                        {
+// at the line boundary.
                             // time to rotate.
                             w.Write(buf, offset, i + 1);
                             w.Close();
                             offset = i + 1;
 
                             // create a new file and write everything to the new file.
-                            w = new FileStream(BaseLogFileName + "_" + periodicRollingCalendar.format + ext, FileMode.Create);
+                            w = new FileStream(BaseLogFileName + "_" + periodicRollingCalendar.format + ext,
+                                FileMode.Create);
                             rolled = true;
                             if (offset < len)
                             {
@@ -178,15 +182,16 @@ namespace winsw
                     }
 
                     if (!rolled)
-                    {// we didn't roll - most likely as we didnt find a line boundary, so we should log what we read and roll anyway.
+                    {
+// we didn't roll - most likely as we didnt find a line boundary, so we should log what we read and roll anyway.
                         w.Write(buf, 0, len);
                         w.Close();
                         w = new FileStream(BaseLogFileName + "_" + periodicRollingCalendar.format + ext, FileMode.Create);
                     }
-
                 }
                 else
-                {// typical case. write the whole thing into the current file
+                {
+// typical case. write the whole thing into the current file
                     w.Write(buf, 0, len);
                 }
 
@@ -195,7 +200,6 @@ namespace winsw
             data.Close();
             w.Close();
         }
-
     }
 
     public class SizeBasedRollingLogAppender : AbstractFileLogAppender
@@ -203,15 +207,11 @@ namespace winsw
         // ReSharper disable once InconsistentNaming
         public static int BYTES_PER_KB = 1024;
         // ReSharper disable once InconsistentNaming
-        public static int BYTES_PER_MB = 1024 * BYTES_PER_KB;
+        public static int BYTES_PER_MB = 1024*BYTES_PER_KB;
         // ReSharper disable once InconsistentNaming
-        public static int DEFAULT_SIZE_THRESHOLD = 10 * BYTES_PER_MB; // rotate every 10MB.
+        public static int DEFAULT_SIZE_THRESHOLD = 10*BYTES_PER_MB; // rotate every 10MB.
         // ReSharper disable once InconsistentNaming
         public static int DEFAULT_FILES_TO_KEEP = 8;
-
-        public int SizeTheshold { private set; get; }
-
-        public int FilesToKeep { private set; get; }
 
         public SizeBasedRollingLogAppender(string logDirectory, string baseName, int sizeThreshold, int filesToKeep)
             : base(logDirectory, baseName)
@@ -221,7 +221,12 @@ namespace winsw
         }
 
         public SizeBasedRollingLogAppender(string logDirectory, string baseName)
-            : this(logDirectory, baseName, DEFAULT_SIZE_THRESHOLD, DEFAULT_FILES_TO_KEEP) { }
+            : this(logDirectory, baseName, DEFAULT_SIZE_THRESHOLD, DEFAULT_FILES_TO_KEEP)
+        {
+        }
+
+        public int SizeTheshold { private set; get; }
+        public int FilesToKeep { private set; get; }
 
         public override void log(Stream outputStream, Stream errorStream)
         {
@@ -230,28 +235,29 @@ namespace winsw
         }
 
         /// <summary>
-        /// Works like the CopyStream method but does a log rotation.
+        ///     Works like the CopyStream method but does a log rotation.
         /// </summary>
         private void CopyStreamWithRotation(Stream data, string ext)
         {
-            byte[] buf = new byte[1024];
-            FileStream w = new FileStream(BaseLogFileName + ext, FileMode.Append);
-            long sz = new FileInfo(BaseLogFileName + ext).Length;
+            var buf = new byte[1024];
+            var w = new FileStream(BaseLogFileName + ext, FileMode.Append);
+            var sz = new FileInfo(BaseLogFileName + ext).Length;
 
             while (true)
             {
-                int len = data.Read(buf, 0, buf.Length);
-                if (len == 0) break;    // EOF
+                var len = data.Read(buf, 0, buf.Length);
+                if (len == 0) break; // EOF
                 if (sz + len < SizeTheshold)
-                {// typical case. write the whole thing into the current file
+                {
+// typical case. write the whole thing into the current file
                     w.Write(buf, 0, len);
                     sz += len;
                 }
                 else
                 {
                     // rotate at the line boundary
-                    int s = 0;
-                    for (int i = 0; i < len; i++)
+                    var s = 0;
+                    for (var i = 0; i < len; i++)
                     {
                         if (buf[i] != 0x0A) continue;
                         if (sz + i < SizeTheshold) continue;
@@ -264,10 +270,10 @@ namespace winsw
 
                         try
                         {
-                            for (int j = FilesToKeep; j >= 1; j--)
+                            for (var j = FilesToKeep; j >= 1; j--)
                             {
-                                string dst = BaseLogFileName + "." + (j - 1) + ext;
-                                string src = BaseLogFileName + "." + (j - 2) + ext;
+                                var dst = BaseLogFileName + "." + (j - 1) + ext;
+                                var src = BaseLogFileName + "." + (j - 2) + ext;
                                 if (File.Exists(dst))
                                     File.Delete(dst);
                                 if (File.Exists(src))
@@ -295,7 +301,7 @@ namespace winsw
     }
 
     /// <summary>
-    /// Rotate log when a service is newly started.
+    ///     Rotate log when a service is newly started.
     /// </summary>
     public class RollingLogAppender : SimpleLogAppender
     {

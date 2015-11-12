@@ -8,27 +8,19 @@ using System.Text;
 
 namespace winsw
 {
-    class ServiceManager : IDisposable
+    internal class ServiceManager : IDisposable
     {
         private IntPtr _handle;
 
         public ServiceManager()
         {
-            _handle = Advapi32.OpenSCManager(null, null, (uint)SCM_ACCESS.SC_MANAGER_ALL_ACCESS);
+            _handle = Advapi32.OpenSCManager(null, null, (uint) SCM_ACCESS.SC_MANAGER_ALL_ACCESS);
             if (_handle == IntPtr.Zero)
             {
-                throw new Exception(String.Format("Error connecting to Service Control Manager. Error provided was: 0x{0:X}", Marshal.GetLastWin32Error()));
+                throw new Exception(
+                    string.Format("Error connecting to Service Control Manager. Error provided was: 0x{0:X}",
+                        Marshal.GetLastWin32Error()));
             }
-        }
-
-        public Service Open(string serviceName)
-        {
-            IntPtr svcHandle = Advapi32.OpenService(_handle, serviceName, (int)SERVICE_ACCESS.SERVICE_ALL_ACCESS);
-            if (svcHandle == IntPtr.Zero)
-            {
-                throw new Exception(String.Format("Error opening service for modifying. Error returned was: 0x{0:X}", Marshal.GetLastWin32Error()));
-            }
-            return new Service(svcHandle);
         }
 
         public void Dispose()
@@ -37,9 +29,20 @@ namespace winsw
                 Advapi32.CloseServiceHandle(_handle);
             _handle = IntPtr.Zero;
         }
+
+        public Service Open(string serviceName)
+        {
+            var svcHandle = Advapi32.OpenService(_handle, serviceName, (int) SERVICE_ACCESS.SERVICE_ALL_ACCESS);
+            if (svcHandle == IntPtr.Zero)
+            {
+                throw new Exception(string.Format("Error opening service for modifying. Error returned was: 0x{0:X}",
+                    Marshal.GetLastWin32Error()));
+            }
+            return new Service(svcHandle);
+        }
     }
 
-    class Service : IDisposable
+    internal class Service : IDisposable
     {
         internal IntPtr Handle;
 
@@ -48,9 +51,16 @@ namespace winsw
             Handle = service;
         }
 
+        public void Dispose()
+        {
+            if (Handle != IntPtr.Zero)
+                Advapi32.CloseServiceHandle(Handle);
+            Handle = IntPtr.Zero;
+        }
+
         public void ChangeConfig(TimeSpan failureResetPeriod, List<SC_ACTION> actions)
         {
-            SERVICE_FAILURE_ACTIONS sfa = new SERVICE_FAILURE_ACTIONS
+            var sfa = new SERVICE_FAILURE_ACTIONS
             {
                 dwResetPeriod = (int) failureResetPeriod.TotalSeconds,
                 lpRebootMsg = "",
@@ -59,18 +69,20 @@ namespace winsw
             // delete message
             // delete the command to run
 
-            int len = Marshal.SizeOf(typeof(SC_ACTION));
+            var len = Marshal.SizeOf(typeof (SC_ACTION));
 
             sfa.cActions = actions.Count;
-            sfa.lpsaActions = Marshal.AllocHGlobal(len * actions.Count);
+            sfa.lpsaActions = Marshal.AllocHGlobal(len*actions.Count);
             try
             {
-                for (int i = 0; i < actions.Count; i++)
+                for (var i = 0; i < actions.Count; i++)
                 {
-                    Marshal.StructureToPtr(actions[i], new IntPtr(sfa.lpsaActions.ToInt64() + i * len), false);
+                    Marshal.StructureToPtr(actions[i], new IntPtr(sfa.lpsaActions.ToInt64() + i*len), false);
                 }
 
-                if (!Advapi32.ChangeServiceConfig2(Handle, SERVICE_CONFIG_INFOLEVEL.SERVICE_CONFIG_FAILURE_ACTIONS, ref sfa))
+                if (
+                    !Advapi32.ChangeServiceConfig2(Handle, SERVICE_CONFIG_INFOLEVEL.SERVICE_CONFIG_FAILURE_ACTIONS,
+                        ref sfa))
                     throw new Exception("Failed to change the failure actions", new Win32Exception());
             }
             finally
@@ -78,28 +90,21 @@ namespace winsw
                 Marshal.FreeHGlobal(sfa.lpsaActions);
             }
         }
-
-        public void Dispose()
-        {
-            if (Handle!=IntPtr.Zero)
-                Advapi32.CloseServiceHandle(Handle);
-            Handle = IntPtr.Zero;
-        }
     }
 
-    static class LogonAsAService
+    internal static class LogonAsAService
     {
         public static void AddLogonAsAServiceRight(string username)
         {
             //Needs to be at least XP or 2003 server
             //https://msdn.microsoft.com/en-us/library/windows/desktop/ms724832%28v=vs.85%29.aspx
-            OperatingSystem osInfo = Environment.OSVersion;
+            var osInfo = Environment.OSVersion;
 
             if (osInfo.Version.Major >= 5 && osInfo.Version.Minor >= 1)
             {
                 var newuser = GetLocalAccountIfLocalAccount(username);
                 //Trace.WriteLine("Username for Logon as A Service: " + newuser);
-                long rightexitcode = SetRight(newuser, PrivlegeRights.SeServiceLogonRight.ToString());
+                var rightexitcode = SetRight(newuser, PrivlegeRights.SeServiceLogonRight.ToString());
                 if (rightexitcode != 0)
                 {
                     Console.WriteLine("Failed to set logon as a service right");
@@ -114,23 +119,22 @@ namespace winsw
 
         private static string GetDomain(string s)
         {
-            int stop = s.IndexOf("\\", StringComparison.Ordinal);
+            var stop = s.IndexOf("\\", StringComparison.Ordinal);
             if (stop >= 0)
                 return s.Substring(0, stop);
-            else
-                return null;
+            return null;
         }
 
         private static string GetLogin(string s)
         {
-            int stop = s.IndexOf("\\", StringComparison.Ordinal);
+            var stop = s.IndexOf("\\", StringComparison.Ordinal);
             return (stop > -1) ? s.Substring(stop + 1, s.Length - stop - 1) : s;
         }
 
         private static string GetLocalAccountIfLocalAccount(string username)
         {
             var machinename = Environment.MachineName;
-            string domain = GetDomain(username);
+            var domain = GetDomain(username);
             if (domain == null || domain.ToLower() == machinename.ToLower() || domain == ".")
             {
                 return GetLogin(username);
@@ -142,29 +146,31 @@ namespace winsw
         /// <param name="accountName">Name of an account - "domain\account" or only "account"</param>
         /// <param name="privilegeName">Name ofthe privilege</param>
         /// <returns>The windows error code returned by LsaAddAccountRights</returns>
-        private static long SetRight(String accountName, String privilegeName)
+        private static long SetRight(string accountName, string privilegeName)
         {
             long winErrorCode = 0; //contains the last error
 
             //pointer an size for the SID
-            IntPtr sid = IntPtr.Zero;
-            int sidSize = 0;
+            var sid = IntPtr.Zero;
+            var sidSize = 0;
             //StringBuilder and size for the domain name
-            StringBuilder domainName = new StringBuilder();
-            int nameSize = 0;
+            var domainName = new StringBuilder();
+            var nameSize = 0;
             //account-type variable for lookup
-            int accountType = 0;
+            var accountType = 0;
 
             //get required buffer size
-            Advapi32.LookupAccountName(String.Empty, accountName, sid, ref sidSize, domainName, ref nameSize, ref accountType);
+            Advapi32.LookupAccountName(string.Empty, accountName, sid, ref sidSize, domainName, ref nameSize,
+                ref accountType);
 
             //allocate buffers
             domainName = new StringBuilder(nameSize);
             sid = Marshal.AllocHGlobal(sidSize);
 
             //lookup the SID for the account
-            bool result = Advapi32.LookupAccountName(String.Empty, accountName, sid, ref sidSize, domainName, ref nameSize,
-                                            ref accountType);
+            var result = Advapi32.LookupAccountName(string.Empty, accountName, sid, ref sidSize, domainName,
+                ref nameSize,
+                ref accountType);
 
             //say what you're doing
             //Console.WriteLine("LookupAccountName result = " + result);
@@ -178,11 +184,10 @@ namespace winsw
             }
             else
             {
-
                 //initialize an empty unicode-string
-                LSA_UNICODE_STRING systemName = new LSA_UNICODE_STRING();
+                var systemName = new LSA_UNICODE_STRING();
                 //combine all policies
-                const int access = (int)(
+                const int access = (int) (
                     LSA_AccessPolicy.POLICY_AUDIT_LOG_ADMIN |
                     LSA_AccessPolicy.POLICY_CREATE_ACCOUNT |
                     LSA_AccessPolicy.POLICY_CREATE_PRIVILEGE |
@@ -198,10 +203,10 @@ namespace winsw
                     LSA_AccessPolicy.POLICY_VIEW_LOCAL_INFORMATION
                     );
                 //initialize a pointer for the policy handle
-                IntPtr policyHandle = IntPtr.Zero;
+                var policyHandle = IntPtr.Zero;
 
                 //these attributes are not used, but LsaOpenPolicy wants them to exists
-                LSA_OBJECT_ATTRIBUTES objectAttributes = new LSA_OBJECT_ATTRIBUTES
+                var objectAttributes = new LSA_OBJECT_ATTRIBUTES
                 {
                     Length = 0,
                     RootDirectory = IntPtr.Zero,
@@ -211,7 +216,7 @@ namespace winsw
                 };
 
                 //get a policy handle
-                uint resultPolicy = Advapi32.LsaOpenPolicy(ref systemName, ref objectAttributes, access, out policyHandle);
+                var resultPolicy = Advapi32.LsaOpenPolicy(ref systemName, ref objectAttributes, access, out policyHandle);
                 winErrorCode = Advapi32.LsaNtStatusToWinError(resultPolicy);
 
                 if (winErrorCode != 0)
@@ -224,14 +229,14 @@ namespace winsw
                     //we can add rights to the account.
 
                     //initialize an unicode-string for the privilege name
-                    LSA_UNICODE_STRING[] userRights = new LSA_UNICODE_STRING[1];
+                    var userRights = new LSA_UNICODE_STRING[1];
                     userRights[0] = new LSA_UNICODE_STRING();
                     userRights[0].Buffer = Marshal.StringToHGlobalUni(privilegeName);
-                    userRights[0].Length = (UInt16)(privilegeName.Length * UnicodeEncoding.CharSize);
-                    userRights[0].MaximumLength = (UInt16)((privilegeName.Length + 1) * UnicodeEncoding.CharSize);
+                    userRights[0].Length = (ushort) (privilegeName.Length*UnicodeEncoding.CharSize);
+                    userRights[0].MaximumLength = (ushort) ((privilegeName.Length + 1)*UnicodeEncoding.CharSize);
 
                     //add the right to the account
-                    uint res = Advapi32.LsaAddAccountRights(policyHandle, sid, userRights, 1);
+                    var res = Advapi32.LsaAddAccountRights(policyHandle, sid, userRights, 1);
                     winErrorCode = Advapi32.LsaNtStatusToWinError(res);
                     if (winErrorCode != 0)
                     {
@@ -248,25 +253,27 @@ namespace winsw
     }
 
     /// <summary>
-    /// Advapi32.dll wrapper for performing additional service related operations that are not
-    /// available in WMI.
+    ///     Advapi32.dll wrapper for performing additional service related operations that are not
+    ///     available in WMI.
     /// </summary>
     internal class Advapi32
     {
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool ChangeServiceConfig2(IntPtr hService, SERVICE_CONFIG_INFOLEVEL dwInfoLevel, IntPtr lpInfo);
+        internal static extern bool ChangeServiceConfig2(IntPtr hService, SERVICE_CONFIG_INFOLEVEL dwInfoLevel,
+            IntPtr lpInfo);
 
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool ChangeServiceConfig2(IntPtr hService, SERVICE_CONFIG_INFOLEVEL dwInfoLevel, ref SERVICE_FAILURE_ACTIONS sfa);
+        internal static extern bool ChangeServiceConfig2(IntPtr hService, SERVICE_CONFIG_INFOLEVEL dwInfoLevel,
+            ref SERVICE_FAILURE_ACTIONS sfa);
 
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         internal static extern IntPtr OpenSCManager(string machineName, string databaseName, uint dwAccess);
 
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         internal static extern IntPtr OpenService(IntPtr hSCManager, string lpServiceName, uint dwDesiredAccess);
-        
+
         [DllImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool CloseServiceHandle(IntPtr hSCObject);
@@ -275,17 +282,20 @@ namespace winsw
         internal static extern bool SetServiceStatus(IntPtr hServiceStatus, ref SERVICE_STATUS lpServiceStatus);
 
         [DllImport("advapi32.dll", PreserveSig = true)]
-        internal static extern UInt32 LsaOpenPolicy(ref LSA_UNICODE_STRING SystemName, ref LSA_OBJECT_ATTRIBUTES ObjectAttributes, Int32 DesiredAccess,
+        internal static extern uint LsaOpenPolicy(ref LSA_UNICODE_STRING SystemName,
+            ref LSA_OBJECT_ATTRIBUTES ObjectAttributes, int DesiredAccess,
             out IntPtr PolicyHandle);
 
         [DllImport("advapi32.dll", SetLastError = true, PreserveSig = true)]
-        internal static extern uint LsaAddAccountRights(IntPtr PolicyHandle, IntPtr AccountSid, LSA_UNICODE_STRING[] UserRights, uint CountOfRights);
+        internal static extern uint LsaAddAccountRights(IntPtr PolicyHandle, IntPtr AccountSid,
+            LSA_UNICODE_STRING[] UserRights, uint CountOfRights);
 
         [DllImport("advapi32")]
         internal static extern void FreeSid(IntPtr pSid);
 
         [DllImport("advapi32.dll", CharSet = CharSet.Auto, SetLastError = true, PreserveSig = true)]
-        internal static extern bool LookupAccountName(string lpSystemName, string lpAccountName, IntPtr psid, ref int cbsid, StringBuilder domainName, 
+        internal static extern bool LookupAccountName(string lpSystemName, string lpAccountName, IntPtr psid,
+            ref int cbsid, StringBuilder domainName,
             ref int cbdomainLength, ref int use);
 
         [DllImport("advapi32.dll")]
@@ -296,46 +306,47 @@ namespace winsw
 
         [DllImport("advapi32.dll", SetLastError = false)]
         internal static extern uint LsaNtStatusToWinError(uint status);
-
     }
 
     //http://msdn.microsoft.com/en-us/library/windows/desktop/bb545671(v=vs.85).aspx
     internal enum PrivlegeRights
     {
-        SeServiceLogonRight,                 //Required for an account to log on using the service logon type.
-        SeRemoteInteractiveLogonRight,       //Required for an account to log on remotely using the interactive logon type.
-        SeNetworkLogonRight,                 //Required for an account to log on using the network logon type.
-        SeInteractiveLogonRight,             //Required for an account to log on using the interactive logon type.
-        SeDenyServiceLogonRight,            //Explicitly denies an account the right to log on using the service logon type.
-        SeDenyRemoteInteractiveLogonRight,   //Explicitly denies an account the right to log on remotely using the interactive logon type.
-        SeDenyNetworkLogonRight,             //Explicitly denies an account the right to log on using the network logon type.
-        SeDenyInteractiveLogonRight,         //Explicitly denies an account the right to log on using the interactive logon type.
-        SeDenyBatchLogonRight,               //Explicitly denies an account the right to log on using the batch logon type.
-        SeBatchLogonRight                    //Required for an account to log on using the batch logon type.
+        SeServiceLogonRight, //Required for an account to log on using the service logon type.
+        SeRemoteInteractiveLogonRight, //Required for an account to log on remotely using the interactive logon type.
+        SeNetworkLogonRight, //Required for an account to log on using the network logon type.
+        SeInteractiveLogonRight, //Required for an account to log on using the interactive logon type.
+        SeDenyServiceLogonRight, //Explicitly denies an account the right to log on using the service logon type.
+        SeDenyRemoteInteractiveLogonRight,
+        //Explicitly denies an account the right to log on remotely using the interactive logon type.
+        SeDenyNetworkLogonRight, //Explicitly denies an account the right to log on using the network logon type.
+        SeDenyInteractiveLogonRight,
+        //Explicitly denies an account the right to log on using the interactive logon type.
+        SeDenyBatchLogonRight, //Explicitly denies an account the right to log on using the batch logon type.
+        SeBatchLogonRight //Required for an account to log on using the batch logon type.
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    struct LSA_UNICODE_STRING
+    internal struct LSA_UNICODE_STRING
     {
-        public UInt16 Length;
-        public UInt16 MaximumLength;
+        public ushort Length;
+        public ushort MaximumLength;
         public IntPtr Buffer;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    struct LSA_OBJECT_ATTRIBUTES
+    internal struct LSA_OBJECT_ATTRIBUTES
     {
         public int Length;
         public IntPtr RootDirectory;
         public LSA_UNICODE_STRING ObjectName;
-        public UInt32 Attributes;
+        public uint Attributes;
         public IntPtr SecurityDescriptor;
         public IntPtr SecurityQualityOfService;
     }
 
     // enum all policies
     [Flags]
-    enum LSA_AccessPolicy : long
+    internal enum LSA_AccessPolicy : long
     {
         POLICY_VIEW_LOCAL_INFORMATION = 0x00000001L,
         POLICY_VIEW_AUDIT_INFORMATION = 0x00000002L,
@@ -355,64 +366,63 @@ namespace winsw
     internal enum SCM_ACCESS : uint
     {
         /// <summary>
-        /// Required to connect to the service control manager.
+        ///     Required to connect to the service control manager.
         /// </summary>
-        
         SC_MANAGER_CONNECT = 0x00001,
 
         /// <summary>
-        /// Required to call the CreateService function to create a service
-        /// object and add it to the database.
+        ///     Required to call the CreateService function to create a service
+        ///     object and add it to the database.
         /// </summary>
         SC_MANAGER_CREATE_SERVICE = 0x00002,
 
         /// <summary>
-        /// Required to call the EnumServicesStatusEx function to list the 
-        /// services that are in the database.
+        ///     Required to call the EnumServicesStatusEx function to list the
+        ///     services that are in the database.
         /// </summary>
         SC_MANAGER_ENUMERATE_SERVICE = 0x00004,
 
         /// <summary>
-        /// Required to call the LockServiceDatabase function to acquire a 
-        /// lock on the database.
+        ///     Required to call the LockServiceDatabase function to acquire a
+        ///     lock on the database.
         /// </summary>
         SC_MANAGER_LOCK = 0x00008,
 
         /// <summary>
-        /// Required to call the QueryServiceLockStatus function to retrieve 
-        /// the lock status information for the database.
+        ///     Required to call the QueryServiceLockStatus function to retrieve
+        ///     the lock status information for the database.
         /// </summary>
         SC_MANAGER_QUERY_LOCK_STATUS = 0x00010,
 
         /// <summary>
-        /// Required to call the NotifyBootConfigStatus function.
+        ///     Required to call the NotifyBootConfigStatus function.
         /// </summary>
         SC_MANAGER_MODIFY_BOOT_CONFIG = 0x00020,
 
         /// <summary>
-        /// Includes STANDARD_RIGHTS_REQUIRED, in addition to all access 
-        /// rights in this table.
+        ///     Includes STANDARD_RIGHTS_REQUIRED, in addition to all access
+        ///     rights in this table.
         /// </summary>
         SC_MANAGER_ALL_ACCESS = ACCESS_MASK.STANDARD_RIGHTS_REQUIRED |
-            SC_MANAGER_CONNECT |
-            SC_MANAGER_CREATE_SERVICE |
-            SC_MANAGER_ENUMERATE_SERVICE |
-            SC_MANAGER_LOCK |
-            SC_MANAGER_QUERY_LOCK_STATUS |
-            SC_MANAGER_MODIFY_BOOT_CONFIG,
+                                SC_MANAGER_CONNECT |
+                                SC_MANAGER_CREATE_SERVICE |
+                                SC_MANAGER_ENUMERATE_SERVICE |
+                                SC_MANAGER_LOCK |
+                                SC_MANAGER_QUERY_LOCK_STATUS |
+                                SC_MANAGER_MODIFY_BOOT_CONFIG,
 
         GENERIC_READ = ACCESS_MASK.STANDARD_RIGHTS_READ |
-            SC_MANAGER_ENUMERATE_SERVICE |
-            SC_MANAGER_QUERY_LOCK_STATUS,
+                       SC_MANAGER_ENUMERATE_SERVICE |
+                       SC_MANAGER_QUERY_LOCK_STATUS,
 
         GENERIC_WRITE = ACCESS_MASK.STANDARD_RIGHTS_WRITE |
-            SC_MANAGER_CREATE_SERVICE |
-            SC_MANAGER_MODIFY_BOOT_CONFIG,
+                        SC_MANAGER_CREATE_SERVICE |
+                        SC_MANAGER_MODIFY_BOOT_CONFIG,
 
         GENERIC_EXECUTE = ACCESS_MASK.STANDARD_RIGHTS_EXECUTE |
-            SC_MANAGER_CONNECT | SC_MANAGER_LOCK,
+                          SC_MANAGER_CONNECT | SC_MANAGER_LOCK,
 
-        GENERIC_ALL = SC_MANAGER_ALL_ACCESS,
+        GENERIC_ALL = SC_MANAGER_ALL_ACCESS
     }
 
     [Flags]
@@ -428,16 +438,17 @@ namespace winsw
         SERVICE_PAUSE_CONTINUE = 0x00040,
         SERVICE_INTERROGATE = 0x00080,
         SERVICE_USER_DEFINED_CONTROL = 0x00100,
+
         SERVICE_ALL_ACCESS = (STANDARD_RIGHTS_REQUIRED |
-                          SERVICE_QUERY_CONFIG |
-                          SERVICE_CHANGE_CONFIG |
-                          SERVICE_QUERY_STATUS |
-                          SERVICE_ENUMERATE_DEPENDENTS |
-                          SERVICE_START |
-                          SERVICE_STOP |
-                          SERVICE_PAUSE_CONTINUE |
-                          SERVICE_INTERROGATE |
-                          SERVICE_USER_DEFINED_CONTROL)
+                              SERVICE_QUERY_CONFIG |
+                              SERVICE_CHANGE_CONFIG |
+                              SERVICE_QUERY_STATUS |
+                              SERVICE_ENUMERATE_DEPENDENTS |
+                              SERVICE_START |
+                              SERVICE_STOP |
+                              SERVICE_PAUSE_CONTINUE |
+                              SERVICE_INTERROGATE |
+                              SERVICE_USER_DEFINED_CONTROL)
     }
 
     [Flags]
@@ -493,13 +504,13 @@ namespace winsw
 
     public struct SERVICE_STATUS
     {
-        public int serviceType;
-        public int currentState;
-        public int controlsAccepted;
-        public int win32ExitCode;
-        public int serviceSpecificExitCode;
         public int checkPoint;
+        public int controlsAccepted;
+        public int currentState;
+        public int serviceSpecificExitCode;
+        public int serviceType;
         public int waitHint;
+        public int win32ExitCode;
     }
 
     public enum State
@@ -510,24 +521,25 @@ namespace winsw
         SERVICE_RUNNING = 0x00000004,
         SERVICE_CONTINUE_PENDING = 0x00000005,
         SERVICE_PAUSE_PENDING = 0x00000006,
-        SERVICE_PAUSED = 0x00000007,
+        SERVICE_PAUSED = 0x00000007
     }
-    
+
 
     // http://msdn.microsoft.com/en-us/library/windows/desktop/ms685126(v=vs.85).aspx
     [StructLayout(LayoutKind.Sequential)]
     public struct SC_ACTION
     {
         public SC_ACTION_TYPE Type;
+
         /// <summary>
-        /// The time to wait before performing the specified action, in milliseconds.
+        ///     The time to wait before performing the specified action, in milliseconds.
         /// </summary>
         public uint Delay;
 
         public SC_ACTION(SC_ACTION_TYPE type, TimeSpan delay)
         {
             Type = type;
-            Delay = (uint)delay.TotalMilliseconds;
+            Delay = (uint) delay.TotalMilliseconds;
         }
     }
 
@@ -553,20 +565,18 @@ namespace winsw
     }
 
     // http://msdn.microsoft.com/en-us/library/windows/desktop/ms685939(v=vs.85).aspx
-    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct SERVICE_FAILURE_ACTIONS
     {
         /// <summary>
-        /// The time after which to reset the failure count to zero if there are no failures, in seconds.
-        /// Specify INFINITE to indicate that this value should never be reset.
+        ///     The time after which to reset the failure count to zero if there are no failures, in seconds.
+        ///     Specify INFINITE to indicate that this value should never be reset.
         /// </summary>
         public int dwResetPeriod;
 
-        [MarshalAs(UnmanagedType.LPWStr)]
-        public string lpRebootMsg;
-        [MarshalAs(UnmanagedType.LPWStr)]
-        public string lpCommand;
+        [MarshalAs(UnmanagedType.LPWStr)] public string lpRebootMsg;
+        [MarshalAs(UnmanagedType.LPWStr)] public string lpCommand;
         public int cActions;
-        public IntPtr/*SC_ACTION[]*/ lpsaActions;
+        public IntPtr /*SC_ACTION[]*/ lpsaActions;
     }
 }

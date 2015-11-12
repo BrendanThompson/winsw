@@ -1,12 +1,13 @@
 ﻿using System;
 using System.Diagnostics;
 using NUnit.Framework;
-using winsw;
+//using winsw;
+using w
 
 namespace winswTests
 {
     using System;
-    using WMI;
+    //using WMI;
 
     [TestFixture]
     public class ServiceDescriptorTests

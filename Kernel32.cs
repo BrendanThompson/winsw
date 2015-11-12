@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace winsw
 {
     /// <summary>
-    /// kernel32.dll P/Invoke wrappers
+    ///     kernel32.dll P/Invoke wrappers
     /// </summary>
     internal class Kernel32
     {
@@ -13,11 +13,11 @@ namespace winsw
 
         [DllImport("kernel32.dll", SetLastError = true)]
         internal static extern bool CreateProcess(string lpApplicationName,
-           string lpCommandLine, IntPtr lpProcessAttributes,
-           IntPtr lpThreadAttributes, bool bInheritHandles,
-           uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory,
-           [In] ref STARTUPINFO lpStartupInfo,
-           out PROCESS_INFORMATION lpProcessInformation);
+            string lpCommandLine, IntPtr lpProcessAttributes,
+            IntPtr lpThreadAttributes, bool bInheritHandles,
+            uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory,
+            [In] ref STARTUPINFO lpStartupInfo,
+            out PROCESS_INFORMATION lpProcessInformation);
 
         [DllImport("kernel32.dll")]
         internal static extern int GetLastError();
@@ -33,22 +33,22 @@ namespace winsw
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    struct STARTUPINFO
+    internal struct STARTUPINFO
     {
-        public Int32 cb;
+        public int cb;
         public string lpReserved;
         public string lpDesktop;
         public string lpTitle;
-        public Int32 dwX;
-        public Int32 dwY;
-        public Int32 dwXSize;
-        public Int32 dwYSize;
-        public Int32 dwXCountChars;
-        public Int32 dwYCountChars;
-        public Int32 dwFillAttribute;
-        public Int32 dwFlags;
-        public Int16 wShowWindow;
-        public Int16 cbReserved2;
+        public int dwX;
+        public int dwY;
+        public int dwXSize;
+        public int dwYSize;
+        public int dwXCountChars;
+        public int dwYCountChars;
+        public int dwFillAttribute;
+        public int dwFlags;
+        public short wShowWindow;
+        public short cbReserved2;
         public IntPtr lpReserved2;
         public IntPtr hStdInput;
         public IntPtr hStdOutput;

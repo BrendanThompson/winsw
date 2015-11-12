@@ -39,7 +39,7 @@ namespace WMI
     }
 
     /// <summary>
-    /// Signals a problem in WMI related operations
+    ///     Signals a problem in WMI related operations
     /// </summary>
     public class WmiException : Exception
     {
@@ -58,26 +58,32 @@ namespace WMI
     }
 
     /// <summary>
-    /// Associated a WMI class name to the proxy interface (which should extend from IWmiCollection)
+    ///     Associated a WMI class name to the proxy interface (which should extend from IWmiCollection)
     /// </summary>
     public class WmiClassName : Attribute
     {
         public readonly string Name;
-        public WmiClassName(string name) { Name = name; }
+
+        public WmiClassName(string name)
+        {
+            Name = name;
+        }
     }
 
     /// <summary>
-    /// Marker interface to denote a collection in WMI.
+    ///     Marker interface to denote a collection in WMI.
     /// </summary>
-    public interface IWmiCollection {}
+    public interface IWmiCollection
+    {
+    }
 
     /// <summary>
-    /// Marker interface to denote an individual managed object
+    ///     Marker interface to denote an individual managed object
     /// </summary>
     public interface IWmiObject
     {
         /// <summary>
-        /// Reflect updates made to this object to the WMI provider.
+        ///     Reflect updates made to this object to the WMI provider.
         /// </summary>
         void Commit();
     }
@@ -86,11 +92,13 @@ namespace WMI
     {
         private readonly ManagementScope scope;
 
-        public WmiRoot() : this(null) { }
+        public WmiRoot() : this(null)
+        {
+        }
 
         public WmiRoot(string machineName)
         {
-            ConnectionOptions options = new ConnectionOptions();
+            var options = new ConnectionOptions();
             options.EnablePrivileges = true;
             options.Impersonation = ImpersonationLevel.Impersonate;
             options.Authentication = AuthenticationLevel.PacketPrivacy;
@@ -98,7 +106,7 @@ namespace WMI
             string path;
 
             if (machineName != null)
-                path = String.Format(@"\\{0}\root\cimv2", machineName);
+                path = string.Format(@"\\{0}\root\cimv2", machineName);
             else
                 path = @"\root\cimv2";
             scope = new ManagementScope(path, options);
@@ -110,27 +118,48 @@ namespace WMI
             return char.ToUpper(s[0]) + s.Substring(1);
         }
 
-        abstract class BaseHandler : IProxyInvocationHandler
+        /// <summary>
+        ///     Obtains an object that corresponds to a table in WMI, which is a collection of a managed object.
+        /// </summary>
+        public T GetCollection<T>() where T : IWmiCollection
+        {
+            var cn = (WmiClassName) typeof (T).GetCustomAttributes(typeof (WmiClassName), false)[0];
+
+            var getOptions = new ObjectGetOptions();
+            var path = new ManagementPath(cn.Name);
+            var manClass = new ManagementClass(scope, path, getOptions);
+            return (T) ProxyFactory.GetInstance().Create(new ClassHandler(manClass, cn.Name), typeof (T), true);
+        }
+
+        private abstract class BaseHandler : IProxyInvocationHandler
         {
             public abstract object Invoke(object proxy, MethodInfo method, object[] args);
 
             protected void CheckError(ManagementBaseObject result)
             {
-                int code = Convert.ToInt32(result["returnValue"]);
+                var code = Convert.ToInt32(result["returnValue"]);
                 if (code != 0)
-                    throw new WmiException((ReturnValue)code);
+                    throw new WmiException((ReturnValue) code);
             }
         }
 
-        class InstanceHandler : BaseHandler, IWmiObject
+        private class InstanceHandler : BaseHandler, IWmiObject
         {
             private readonly ManagementObject _mo;
 
-            public InstanceHandler(ManagementObject o) { _mo = o; }
+            public InstanceHandler(ManagementObject o)
+            {
+                _mo = o;
+            }
+
+            public void Commit()
+            {
+                _mo.Put();
+            }
 
             public override object Invoke(object proxy, MethodInfo method, object[] args)
             {
-                if (method.DeclaringType == typeof(IWmiObject))
+                if (method.DeclaringType == typeof (IWmiObject))
                 {
                     return method.Invoke(this, args);
                 }
@@ -147,71 +176,58 @@ namespace WMI
                 }
 
                 // method invocations
-                ParameterInfo[] methodArgs = method.GetParameters();
+                var methodArgs = method.GetParameters();
 
-                ManagementBaseObject wmiArgs = _mo.GetMethodParameters(method.Name);
-                for (int i = 0; i < args.Length; i++)
+                var wmiArgs = _mo.GetMethodParameters(method.Name);
+                for (var i = 0; i < args.Length; i++)
                     wmiArgs[Capitalize(methodArgs[i].Name)] = args[i];
 
                 CheckError(_mo.InvokeMethod(method.Name, wmiArgs, null));
                 return null;
             }
-
-            public void Commit()
-            {
-                _mo.Put();
-            }
         }
 
-        class ClassHandler : BaseHandler
+        private class ClassHandler : BaseHandler
         {
             private readonly ManagementClass _mc;
             private readonly string _wmiClass;
 
-            public ClassHandler(ManagementClass mc, string wmiClass) { _mc = mc; _wmiClass = wmiClass; }
+            public ClassHandler(ManagementClass mc, string wmiClass)
+            {
+                _mc = mc;
+                _wmiClass = wmiClass;
+            }
 
             public override object Invoke(object proxy, MethodInfo method, object[] args)
             {
-                ParameterInfo[] methodArgs = method.GetParameters();
+                var methodArgs = method.GetParameters();
 
                 if (method.Name.StartsWith("Select"))
                 {
                     // select method to find instances
-                    string query = "SELECT * FROM " + _wmiClass + " WHERE ";
-                    for (int i = 0; i < args.Length; i++)
+                    var query = "SELECT * FROM " + _wmiClass + " WHERE ";
+                    for (var i = 0; i < args.Length; i++)
                     {
                         if (i != 0) query += " AND ";
                         query += ' ' + Capitalize(methodArgs[i].Name) + " = '" + args[i] + "'";
                     }
 
-                    ManagementObjectSearcher searcher = new ManagementObjectSearcher(_mc.Scope, new ObjectQuery(query));
-                    ManagementObjectCollection results = searcher.Get();
+                    var searcher = new ManagementObjectSearcher(_mc.Scope, new ObjectQuery(query));
+                    var results = searcher.Get();
                     // TODO: support collections
                     foreach (ManagementObject manObject in results)
-                        return ProxyFactory.GetInstance().Create(new InstanceHandler(manObject), method.ReturnType, true);
+                        return ProxyFactory.GetInstance()
+                            .Create(new InstanceHandler(manObject), method.ReturnType, true);
                     return null;
                 }
 
-                ManagementBaseObject wmiArgs = _mc.GetMethodParameters(method.Name);
-                for (int i = 0; i < args.Length; i++)
+                var wmiArgs = _mc.GetMethodParameters(method.Name);
+                for (var i = 0; i < args.Length; i++)
                     wmiArgs[Capitalize(methodArgs[i].Name)] = args[i];
 
                 CheckError(_mc.InvokeMethod(method.Name, wmiArgs, null));
                 return null;
             }
-        }
-
-        /// <summary>
-        /// Obtains an object that corresponds to a table in WMI, which is a collection of a managed object.
-        /// </summary>
-        public T GetCollection<T>() where T : IWmiCollection
-        {
-            WmiClassName cn = (WmiClassName)typeof(T).GetCustomAttributes(typeof(WmiClassName), false)[0];
-
-            ObjectGetOptions getOptions = new ObjectGetOptions();
-            ManagementPath path = new ManagementPath(cn.Name);
-            ManagementClass manClass = new ManagementClass(scope, path, getOptions);
-            return (T)ProxyFactory.GetInstance().Create(new ClassHandler(manClass, cn.Name), typeof(T), true);
         }
     }
 }
